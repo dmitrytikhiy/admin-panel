@@ -1,0 +1,48 @@
+# Runtime setup
+
+FROM webdevops/php-nginx-dev:7.3
+
+EXPOSE 80
+ENV PORT=80
+
+ARG APP_UID=1000
+ENV APP_UID=${APP_UID}
+
+RUN if ! [ $APP_UID = "1000" ]; then\
+    userdel application && \
+    groupadd --gid $APP_UID application && \
+    useradd --uid $APP_UID --gid $APP_UID --shell /bin/bash --create-home application && \
+    chown -R application:application /home/application; \
+fi
+
+ENV PHP_MEMORY_LIMIT=256M
+ENV PHP_UPLOAD_MAX_FILESIZE=256M
+ENV PHP_POST_MAX_SIZE=256M
+ENV WEB_DOCUMENT_ROOT=/app/public
+
+WORKDIR /app
+
+RUN rm \
+    /opt/docker/etc/supervisor.d/ssh.conf \
+    /opt/docker/etc/supervisor.d/postfix.conf
+
+RUN echo 'client_max_body_size 512M;' > /opt/docker/etc/nginx/vhost.common.d/10-general.conf
+
+RUN su application -c "echo '* * * * * cd /app && /usr/local/bin/php /app/artisan schedule:run >>/dev/null 2>&1' | crontab -"
+
+# Development setup part
+
+ENV COMPOSER_MEMORY_LIMIT=-1
+
+RUN apt-get update -q -y
+
+RUN apt-get -y install curl dirmngr apt-transport-https lsb-release ca-certificates
+RUN curl -sL https://deb.nodesource.com/setup_12.x | bash -
+RUN apt-get -y install nodejs
+
+CMD su application -c "composer install" && \
+    su application -c "npm install" && \
+    su application -c "npm run dev" && \
+    rm -rf /app/public/storage && \
+    su application -c "php artisan storage:link" && \
+    supervisord
